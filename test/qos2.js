@@ -4,6 +4,7 @@ const { test } = require('tap')
 const concat = require('concat-stream')
 const { setup, connect, subscribe } = require('./helper')
 const aedes = require('../')
+const { noError } = require('./helper')
 
 function publish (t, s, packet, done) {
   const msgId = packet.messageId
@@ -91,6 +92,41 @@ test('publish QoS 2', function (t) {
     messageId: 42
   }
   publish(t, s, packet)
+})
+
+test('publish QoS 2, pubrel delivery retry', function (t) {
+  t.plan(3)
+
+  const s = noError(connect(setup()), t)
+  t.tearDown(s.broker.close.bind(s.broker))
+
+  const packet = {
+    cmd: 'publish',
+    topic: 'hello',
+    payload: 'world',
+    qos: 2,
+    messageId: 42
+  }
+  publish(t, s, packet, () => {
+    s.inStream.end()
+
+    const reconnectedS = noError(connect(setup(s.broker)), t)
+    reconnectedS.inStream.write({
+      cmd: 'pubrel',
+      messageId: 42
+    })
+
+    reconnectedS.outStream.once('data', function (packet) {
+      t.deepEqual(packet, {
+        cmd: 'pubcomp',
+        messageId: 42,
+        length: 2,
+        dup: false,
+        retain: false,
+        qos: 0
+      }, 'pubcomp must match')
+    })
+  })
 })
 
 test('subscribe QoS 2', function (t) {
